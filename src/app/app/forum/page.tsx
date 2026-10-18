@@ -3,11 +3,14 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { useActiveAccount } from "thirdweb/react";
+import { keccak256, toBytes } from "viem";
 import {
   ArrowBigDown,
   ArrowBigUp,
   Flame,
   Hash,
+  Loader2,
   MessageSquarePlus,
   Pin,
   Send,
@@ -22,50 +25,86 @@ import { Textarea } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { demoForumPosts } from "@/lib/mock-data";
+import { studentRelay } from "@/lib/onchain/relay-client";
 import type { ForumPost } from "@/lib/types";
-import { encodeForumHash, relativeTime, shortAddress } from "@/lib/utils";
+import { relativeTime, shortAddress } from "@/lib/utils";
 import { FORUM_TOLL } from "@/lib/config";
 
 export default function ForumPage() {
+  const account = useActiveAccount();
   const [posts, setPosts] = useState<ForumPost[]>(demoForumPosts);
   const [content, setContent] = useState("");
   const [sort, setSort] = useState("recientes");
   const [voted, setVoted] = useState<Record<string, 1 | -1>>({});
+  const [publishing, setLoading] = useState(false);
 
-  const publish = () => {
+  const publish = async () => {
     if (content.trim().length < 8) {
       toast.error("Escribe un mensaje un poco más largo");
       return;
     }
-    const createdAt = new Date().toISOString();
-    const hash = encodeForumHash({
-      author: "tú",
-      content,
-      createdAt,
-    });
-    const post: ForumPost = {
-      id: `p-${Date.now()}`,
-      authorId: "me",
-      authorName: "Tú",
-      authorTier: "Plata",
-      content: content.trim(),
-      createdAt,
-      upvotes: 0,
-      downvotes: 0,
-      comments: 0,
-      hash,
-      anchorTx: `0x${Date.now().toString(16)}…`,
-      refundable: false,
-    };
-    setPosts((prev) => [post, ...prev]);
-    setContent("");
-    toast.success(`Publicado · peaje ${FORUM_TOLL} ZAM retenido`, {
-      description: `Se devuelve cuando alcances 5 upvotes. Hash anclado on-chain.`,
-    });
+    if (!account) {
+      toast.error("Inicia sesión con tu billetera para publicar.");
+      return;
+    }
+    const hash = keccak256(toBytes(content.trim()));
+    setLoading(true);
+    try {
+      const res = await studentRelay({
+        account,
+        action: "forum-post",
+        amount: FORUM_TOLL,
+        payload: { contentHash: hash },
+      });
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      const post: ForumPost = {
+        id: `p-${Date.now()}`,
+        authorId: "me",
+        authorName: "Tú",
+        authorTier: "Plata",
+        content: content.trim(),
+        createdAt: new Date().toISOString(),
+        upvotes: 0,
+        downvotes: 0,
+        comments: 0,
+        hash,
+        anchorTx: res.hash,
+        refundable: false,
+      };
+      setPosts((prev) => [post, ...prev]);
+      setContent("");
+      toast.success(`Publicado · peaje ${FORUM_TOLL} ZAM retenido`, {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Error al publicar.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const vote = (id: string, dir: 1 | -1) => {
+  const vote = async (id: string, dir: 1 | -1) => {
     if (voted[id] === dir) return;
+    const postId = Number(id.replace(/\D/g, "")) || 0;
+    if (account && postId) {
+      try {
+        const res = await studentRelay({
+          account,
+          action: "forum-vote",
+          payload: { postId, direction: dir === 1 ? "up" : "down" },
+        });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Error al votar.");
+        return;
+      }
+    }
     setVoted((prev) => ({ ...prev, [id]: dir }));
     setPosts((prev) =>
       prev.map((p) =>
@@ -86,7 +125,23 @@ export default function ForumPage() {
     });
   };
 
-  const boost = (post: ForumPost) => {
+  const boost = async (post: ForumPost) => {
+    if (account) {
+      try {
+        const res = await studentRelay({
+          account,
+          action: "boost-burn",
+          amount: 15,
+        });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Error en el boost.");
+        return;
+      }
+    }
     setPosts((prev) =>
       prev.map((p) => (p.id === post.id ? { ...p, pinned: true } : p)),
     );
@@ -123,8 +178,12 @@ export default function ForumPage() {
                   <Zap className="h-3.5 w-3.5 text-brand" />
                   Peaje {FORUM_TOLL} ZAM · se devuelve con 5 upvotes
                 </span>
-                <Button variant="gradient" size="sm" onClick={publish}>
-                  <Send className="h-4 w-4" />
+                <Button variant="gradient" size="sm" onClick={publish} disabled={publishing}>
+                  {publishing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                   Publicar
                 </Button>
               </div>

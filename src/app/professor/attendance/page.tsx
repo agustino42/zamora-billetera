@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { CalendarPlus, CheckCircle2, StopCircle } from "lucide-react";
+import { keccak256, toBytes } from "viem";
+import { CalendarPlus, CheckCircle2, Loader2, StopCircle } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/dashboard/ui";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +31,8 @@ import {
   demoSubjects,
 } from "@/lib/mock-data";
 import type { AttendanceSession } from "@/lib/types";
-import { relativeTime } from "@/lib/utils";
+import { onchainId, staffRelay } from "@/lib/onchain/relay-client";
+import { relativeTime, shortAddress } from "@/lib/utils";
 
 function genCode() {
   return `ZAM-${Math.floor(1000 + Math.random() * 8999)}`;
@@ -41,6 +43,8 @@ export default function ProfessorAttendancePage() {
     demoAttendanceSessions,
   );
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [closingId, setClosingId] = useState<string | null>(null);
   const [subjectId, setSubjectId] = useState(demoSubjects[0].id);
   const [active, setActive] = useState<AttendanceSession | null>(
     demoAttendanceSessions.find(
@@ -48,32 +52,91 @@ export default function ProfessorAttendancePage() {
     ) ?? null,
   );
 
-  const openSession = () => {
-    const subject = demoSubjects.find((s) => s.id === subjectId)!;
-    const session: AttendanceSession = {
-      id: `ses-${Date.now()}`,
-      subjectId: subject.id,
-      subjectName: subject.name,
-      code: genCode(),
-      openedAt: new Date().toISOString(),
-      closesAt: new Date(Date.now() + 1000 * 60 * 30).toISOString(),
-      closed: false,
-      checkedInCount: 0,
-    };
-    setSessions((prev) => [session, ...prev]);
-    setActive(session);
-    setOpen(false);
-    toast.success("Sesión de asistencia abierta", {
-      description: `Código ${session.code} · válido 30 minutos.`,
-    });
+  const openSession = async () => {
+    const subject = demoSubjects.find((s) => s.id === subjectId);
+    if (!subject) {
+      toast.error("Selecciona una materia");
+      return;
+    }
+    const subjectOnchainId = onchainId(subject.id);
+    if (!subjectOnchainId) {
+      toast.error("Aún no está on-chain");
+      return;
+    }
+    const code = genCode();
+    const durationSeconds = 1800;
+    const codeHash = keccak256(toBytes(code));
+    setPending(true);
+    try {
+      const res = await staffRelay(
+        "attendance-open",
+        { subjectId: subjectOnchainId, codeHash, durationSeconds },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      const session: AttendanceSession = {
+        id: `ses-${Date.now()}`,
+        subjectId: subject.id,
+        subjectName: subject.name,
+        code,
+        openedAt: new Date().toISOString(),
+        closesAt: new Date(Date.now() + durationSeconds * 1000).toISOString(),
+        closed: false,
+        checkedInCount: 0,
+      };
+      setSessions((prev) => [session, ...prev]);
+      setActive(session);
+      setOpen(false);
+      toast.success("Sesión de asistencia abierta on-chain", {
+        description: `Código ${code} · Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Error al abrir la sesión.",
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
-  const close = (id: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, closed: true } : s)),
-    );
-    if (active?.id === id) setActive(null);
-    toast.info("Sesión cerrada");
+  const close = async (id: string) => {
+    const sessionId = onchainId(id);
+    if (!sessionId) {
+      toast.error("Aún no está on-chain");
+      return;
+    }
+    setClosingId(id);
+    try {
+      const res = await staffRelay(
+        "attendance-close",
+        { sessionId },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, closed: true } : s)),
+      );
+      if (active?.id === id) setActive(null);
+      toast.success("Sesión cerrada on-chain", {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Error al cerrar la sesión.",
+      );
+    } finally {
+      setClosingId(null);
+    }
   };
 
   return (
@@ -108,7 +171,12 @@ export default function ProfessorAttendancePage() {
                 </Select>
               </div>
               <DialogFooter>
-                <Button variant="gradient" onClick={openSession}>
+                <Button variant="gradient" disabled={pending} onClick={openSession}>
+                  {pending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CalendarPlus className="h-4 w-4" />
+                  )}{" "}
                   Generar código
                 </Button>
               </DialogFooter>
@@ -141,9 +209,15 @@ export default function ProfessorAttendancePage() {
                   <Button
                     size="sm"
                     variant="outline"
+                    disabled={closingId === s.id}
                     onClick={() => close(s.id)}
                   >
-                    <StopCircle className="h-3.5 w-3.5" /> Cerrar
+                    {closingId === s.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <StopCircle className="h-3.5 w-3.5" />
+                    )}{" "}
+                    Cerrar
                   </Button>
                 )}
               </div>

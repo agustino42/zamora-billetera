@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Check, Plus, X } from "lucide-react";
+import { Check, Loader2, Plus, X } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,8 @@ import {
 } from "@/components/ui/select";
 import { demoSubjects, demoTasks } from "@/lib/mock-data";
 import type { Task } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import { onchainId, staffRelay } from "@/lib/onchain/relay-client";
+import { formatDate, shortAddress } from "@/lib/utils";
 
 const STATUS: Record<Task["status"], { label: string; variant: "muted" | "warning" | "success" | "danger" }> = {
   pending: { label: "Sin entregas", variant: "muted" },
@@ -38,6 +39,8 @@ const STATUS: Record<Task["status"], { label: string; variant: "muted" | "warnin
 export default function ProfessorTasksPage() {
   const [tasks, setTasks] = useState<Task[]>(demoTasks);
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [form, setForm] = useState({
     subjectId: demoSubjects[0].id,
     title: "",
@@ -45,45 +48,102 @@ export default function ProfessorTasksPage() {
     reward: "50",
   });
 
-  const create = () => {
+  const create = async () => {
     if (!form.title.trim()) {
       toast.error("Escribe un título");
       return;
     }
-    const subject = demoSubjects.find((s) => s.id === form.subjectId)!;
-    setTasks((prev) => [
-      {
-        id: `tsk-${Date.now()}`,
-        subjectId: subject.id,
-        subjectName: subject.name,
-        title: form.title,
-        description: form.description || "Sin descripción",
-        reward: Number(form.reward) || 0,
-        dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(),
-        status: "pending",
-      },
-      ...prev,
-    ]);
-    setOpen(false);
-    setForm({ ...form, title: "", description: "" });
-    toast.success("Tarea creada", {
-      description: "Tus alumnos ya pueden verla y entregarla.",
-    });
+    const subject = demoSubjects.find((s) => s.id === form.subjectId);
+    if (!subject) {
+      toast.error("Selecciona una materia");
+      return;
+    }
+    const subjectId = onchainId(subject.id);
+    if (!subjectId) {
+      toast.error("Aún no está on-chain");
+      return;
+    }
+    const reward = Number(form.reward) || 0;
+    setPending(true);
+    try {
+      const res = await staffRelay(
+        "task-create",
+        {
+          subjectId,
+          title: form.title,
+          description: form.description || "Sin descripción",
+          reward,
+        },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setTasks((prev) => [
+        {
+          id: `tsk-${Date.now()}`,
+          subjectId: subject.id,
+          subjectName: subject.name,
+          title: form.title,
+          description: form.description || "Sin descripción",
+          reward,
+          dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString(),
+          status: "pending",
+        },
+        ...prev,
+      ]);
+      setOpen(false);
+      setForm({ ...form, title: "", description: "" });
+      toast.success("Tarea creada on-chain", {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al crear la tarea.",
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
-  const review = (task: Task, approve: boolean) => {
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === task.id
-          ? { ...t, status: approve ? "approved" : "rejected" }
-          : t,
-      ),
-    );
-    toast.success(
-      approve
-        ? `Aprobada · se acuñaron ${task.reward} ZAMORA`
-        : "Entrega rechazada",
-    );
+  const review = async (task: Task, approve: boolean) => {
+    const submissionId = onchainId(task.id);
+    if (!submissionId) {
+      toast.error("Aún no está on-chain");
+      return;
+    }
+    setReviewingId(task.id);
+    try {
+      const res = await staffRelay(
+        "task-review",
+        { submissionId, approve },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === task.id
+            ? { ...t, status: approve ? "approved" : "rejected" }
+            : t,
+        ),
+      );
+      toast.success(
+        approve
+          ? `Aprobada · se acuñaron ${task.reward} ZAMORA`
+          : "Entrega rechazada",
+        { description: `Tx: ${shortAddress(res.hash, 8)}` },
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al revisar la entrega.",
+      );
+    } finally {
+      setReviewingId(null);
+    }
   };
 
   const columns: Column<Task>[] = [
@@ -125,10 +185,25 @@ export default function ProfessorTasksPage() {
       render: (t) =>
         t.status === "submitted" ? (
           <div className="flex gap-2">
-            <Button size="sm" variant="gradient" onClick={() => review(t, true)}>
-              <Check className="h-3.5 w-3.5" /> Aprobar
+            <Button
+              size="sm"
+              variant="gradient"
+              disabled={reviewingId === t.id}
+              onClick={() => review(t, true)}
+            >
+              {reviewingId === t.id ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Check className="h-3.5 w-3.5" />
+              )}{" "}
+              Aprobar
             </Button>
-            <Button size="sm" variant="outline" onClick={() => review(t, false)}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={reviewingId === t.id}
+              onClick={() => review(t, false)}
+            >
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -202,7 +277,8 @@ export default function ProfessorTasksPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="gradient" onClick={create}>
+                <Button variant="gradient" disabled={pending} onClick={create}>
+                  {pending && <Loader2 className="h-4 w-4 animate-spin" />}
                   Crear tarea
                 </Button>
               </DialogFooter>

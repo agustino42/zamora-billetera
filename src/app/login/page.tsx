@@ -4,9 +4,11 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import {
   ArrowRight,
   GraduationCap,
+  KeyRound,
   Loader2,
   Lock,
   Mail,
@@ -14,11 +16,17 @@ import {
   Sparkles,
   UserCog,
 } from "lucide-react";
+import { inAppWallet, preAuthenticate } from "thirdweb/wallets";
+import { useConnect } from "thirdweb/react";
 import { ZamoraLogo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSession } from "@/components/session-provider";
+import { thirdwebClient, hasThirdwebClientId } from "@/lib/thirdweb/client";
+import { chain } from "@/lib/config";
+import { studentRelay } from "@/lib/onchain/relay-client";
+import { createSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/types";
 
@@ -30,7 +38,7 @@ const ROLE_META: Record<
     label: "Estudiante",
     icon: GraduationCap,
     home: "/app",
-    blurb: "Entra con tu correo y reclama tu billetera ZAMORA al instante.",
+    blurb: "Entra con tu correo: tu billetera ZAMORA se crea al instante.",
   },
   professor: {
     label: "Profesor",
@@ -52,13 +60,18 @@ function demoWallet(email: string) {
     h = (h * 31 + email.charCodeAt(i)) >>> 0;
   }
   const hex = h.toString(16).padStart(8, "0");
-  return `0x${hex}${"a1b2c3d4e5f6".repeat(3)}`.slice(0, 42) as string;
+  return `0x${hex}${"a1b2c3d4e5f6".repeat(3)}`.slice(0, 42);
 }
+
+const inApp = inAppWallet({
+  auth: { options: ["email", "google"] },
+});
 
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const { signIn } = useSession();
+  const { connect } = useConnect();
 
   const tipo = (params.get("tipo") ?? "estudiante") as
     | "estudiante"
@@ -70,42 +83,136 @@ function LoginInner() {
   const [role, setRole] = useState<Role>(initialRole);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const meta = ROLE_META[role];
-  const needsPassword = role !== "student";
+  const isStudent = role === "student";
 
-  const handleSubmit = (e: React.FormEvent) => {
+  async function handleSendCode() {
+    if (!hasThirdwebClientId) {
+      toast.error("Configura NEXT_PUBLIC_THIRDWEB_CLIENT_ID para entrar con correo.");
+      return;
+    }
+    if (!email.includes("@")) {
+      toast.error("Introduce un correo válido.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await preAuthenticate({ client: thirdwebClient, strategy: "email", email });
+      setCodeSent(true);
+      toast.success("Te enviamos un código a tu correo.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo enviar el código.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function finishStudentLogin() {
+    const wallet = await connect(async () => inApp);
+    const account = wallet?.getAccount();
+    if (!account) {
+      throw new Error("No se pudo obtener la billetera.");
+    }
+    const name = (email.split("@")[0] || "Estudiante").replace(/[._]/g, " ");
+    signIn({
+      role: "student",
+      name: name.replace(/\b\w/g, (c) => c.toUpperCase()),
+      email,
+      wallet: account.address,
+    });
+    try {
+      await studentRelay({
+        account,
+        action: "register",
+        payload: { nameHash: email },
+      });
+    } catch {
+      // Registro on-chain best-effort.
+    }
+    toast.success("¡Bienvenido a Zamora!");
+    router.push("/app");
+  }
+
+  async function handleVerifyCode(e: React.FormEvent) {
+    e.preventDefault();
+    if (!hasThirdwebClientId) {
+      toast.error("Configura NEXT_PUBLIC_THIRDWEB_CLIENT_ID para entrar.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await inApp.connect({
+        client: thirdwebClient,
+        chain,
+        strategy: "email",
+        email,
+        verificationCode: code,
+      });
+      await finishStudentLogin();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Código incorrecto.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleGoogle() {
+    if (!hasThirdwebClientId) {
+      toast.error("Configura NEXT_PUBLIC_THIRDWEB_CLIENT_ID para entrar.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await inApp.connect({ client: thirdwebClient, chain, strategy: "google" });
+      if (!email) setEmail("estudiante@campus.edu");
+      await finishStudentLogin();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo conectar.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleStaff(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    const name =
-      role === "student"
-        ? (email.split("@")[0] || "Estudiante").replace(/[._]/g, " ")
-        : role === "professor"
-          ? "Prof. " + (email.split("@")[0] || "Docente").replace(/[._]/g, " ")
-          : "Administrador Zamora";
-
-    signIn({
-      role,
-      name: name.replace(/\b\w/g, (c) => c.toUpperCase()),
-      email: email || "demo@zamora.edu",
-      wallet: demoWallet(email || role),
-    });
-
-    setTimeout(() => router.push(meta.home), 450);
-  };
-
-  const quick = (r: Role) => {
-    setRole(r);
-    setEmail(
-      r === "student"
-        ? "valeria.mendoza@campus.edu"
-        : r === "professor"
-          ? "zamora.rios@campus.edu"
-          : "admin@campus.edu",
-    );
-    setPassword("zamora1234");
-  };
+    try {
+      if (isSupabaseConfigured && password) {
+        try {
+          const supabase = createSupabaseBrowserClient();
+          const { error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
+          if (error) throw error;
+        } catch (error) {
+          toast.warning(
+            error instanceof Error
+              ? `${error.message} — entrando en modo demo.`
+              : "Entrando en modo demo.",
+          );
+        }
+      }
+      const name =
+        role === "professor"
+          ? (email.split("@")[0] || "Profesor").replace(/[._]/g, " ")
+          : "Administrador";
+      signIn({
+        role,
+        name: name.replace(/\b\w/g, (c) => c.toUpperCase()),
+        email,
+        wallet: demoWallet(email),
+      });
+      toast.success("Sesión iniciada.");
+      router.push(meta.home);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
@@ -168,7 +275,12 @@ function LoginInner() {
                 <button
                   key={r}
                   type="button"
-                  onClick={() => quick(r)}
+                  onClick={() => {
+                    setRole(r);
+                    setCodeSent(false);
+                    setCode("");
+                    setPassword("");
+                  }}
                   className={cn(
                     "flex flex-col items-center gap-1.5 rounded-xl px-2 py-3 text-xs font-medium transition-all",
                     role === r
@@ -183,26 +295,108 @@ function LoginInner() {
             })}
           </div>
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email">
-                {role === "student" ? "Correo institucional" : "Usuario"}
-              </Label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="tu.nombre@campus.edu"
-                  className="pl-10"
-                />
+          {isStudent ? (
+            <form onSubmit={handleVerifyCode} className="mt-6 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Correo institucional</Label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="tu.nombre@campus.edu"
+                    className="pl-10"
+                    disabled={codeSent}
+                  />
+                </div>
               </div>
-            </div>
 
-            {needsPassword && (
+              {codeSent && (
+                <div className="space-y-2">
+                  <Label htmlFor="code">Código de verificación</Label>
+                  <div className="relative">
+                    <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="code"
+                      inputMode="numeric"
+                      required
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      placeholder="123456"
+                      className="pl-10 tracking-[0.3em]"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {codeSent ? (
+                <Button
+                  type="submit"
+                  variant="gradient"
+                  size="lg"
+                  className="w-full"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      Verificar y entrar
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="gradient"
+                  size="lg"
+                  className="w-full"
+                  disabled={loading}
+                  onClick={handleSendCode}
+                >
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      Crear / entrar con mi correo
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              )}
+
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="w-full"
+                disabled={loading}
+                onClick={handleGoogle}
+              >
+                Continuar con Google
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleStaff} className="mt-6 space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email-staff">Usuario</Label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="email-staff"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="usuario@campus.edu"
+                    className="pl-10"
+                  />
+                </div>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Contraseña</Label>
                 <div className="relative">
@@ -221,32 +415,38 @@ function LoginInner() {
                   Las credenciales de profesor son creadas por la administración.
                 </p>
               </div>
-            )}
 
-            <Button
-              type="submit"
-              variant="gradient"
-              size="lg"
-              className="w-full"
-              disabled={loading}
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  {role === "student" ? "Crear / entrar con mi correo" : "Entrar"}
-                  <ArrowRight className="h-4 w-4" />
-                </>
+              <Button
+                type="submit"
+                variant="gradient"
+                size="lg"
+                className="w-full"
+                disabled={loading}
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    Entrar
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </Button>
+
+              {!isSupabaseConfigured && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Supabase no configurado: se entrará en modo demo.
+                </p>
               )}
-            </Button>
-          </form>
+            </form>
+          )}
 
           <div className="mt-6 rounded-xl border border-border bg-muted/40 p-4 text-xs text-muted-foreground">
-            <p className="font-semibold text-foreground">Modo demo</p>
+            <p className="font-semibold text-foreground">¿Cómo funciona?</p>
             <p className="mt-1">
-              Puedes probar cada rol ahora mismo: toca una pestaña, completa los
-              datos y entra. Al conectar thirdweb + Supabase, este flujo se
-              vuelve real.
+              Los estudiantes entran con un código a su correo (billetera
+              gestionada, sin gas). Profesores y administradores usan las
+              credenciales que creó la administración.
             </p>
           </div>
 

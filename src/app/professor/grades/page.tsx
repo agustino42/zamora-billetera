@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { FileUp, GraduationCap } from "lucide-react";
+import { keccak256, toBytes } from "viem";
+import { FileUp, GraduationCap, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -27,11 +28,15 @@ import {
 } from "@/components/ui/select";
 import { demoGrades, demoStudents, demoSubjects } from "@/lib/mock-data";
 import type { Grade } from "@/lib/types";
-import { formatDate } from "@/lib/utils";
+import { onchainId, staffRelay } from "@/lib/onchain/relay-client";
+import { formatDate, shortAddress } from "@/lib/utils";
+
+const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000001";
 
 export default function ProfessorGradesPage() {
   const [grades, setGrades] = useState<Grade[]>(demoGrades);
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
   const [form, setForm] = useState({
     studentId: demoStudents[0].id,
     subjectId: demoSubjects[0].id,
@@ -39,33 +44,76 @@ export default function ProfessorGradesPage() {
     credits: "4",
   });
 
-  const record = () => {
-    const student = demoStudents.find((s) => s.id === form.studentId)!;
-    const subject = demoSubjects.find((s) => s.id === form.subjectId)!;
+  const record = async () => {
+    const student = demoStudents.find((s) => s.id === form.studentId);
+    const subject = demoSubjects.find((s) => s.id === form.subjectId);
+    if (!student || !subject) {
+      toast.error("Selecciona alumno y materia");
+      return;
+    }
     const score = Number(form.score);
     const credits = Number(form.credits);
+    if (
+      !Number.isFinite(score) ||
+      score < 0 ||
+      score > 20 ||
+      !Number.isFinite(credits) ||
+      credits < 0
+    ) {
+      toast.error("Nota (0-20) y créditos inválidos");
+      return;
+    }
+    const subjectId = onchainId(subject.id);
+    if (!subjectId) {
+      toast.error("Aún no está on-chain");
+      return;
+    }
+    const studentAddress =
+      student.wallet.startsWith("0x") && student.wallet.length === 42
+        ? student.wallet
+        : PLACEHOLDER_ADDRESS;
     const passed = score >= 12;
-    setGrades((prev) => [
-      {
-        id: `gr-${Date.now()}`,
-        studentId: student.id,
-        studentName: student.name,
-        subjectId: subject.id,
-        subjectName: subject.name,
-        score,
-        creditsEarned: passed ? credits : 0,
-        passed,
-        recordedAt: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-    setOpen(false);
-    toast.success(
-      passed
-        ? `Nota registrada · ${credits * 100} ZAMORA acuñados`
-        : "Nota registrada (desaprobada, sin acuñación)",
-      { description: `${student.name} · ${subject.name}` },
-    );
+    const creditsEarned = passed ? credits : 0;
+    const scoreHash = keccak256(toBytes(String(score)));
+    setPending(true);
+    try {
+      const res = await staffRelay(
+        "grade-record",
+        { subjectId, student: studentAddress, scoreHash, creditsEarned, passed },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setGrades((prev) => [
+        {
+          id: `gr-${Date.now()}`,
+          studentId: student.id,
+          studentName: student.name,
+          subjectId: subject.id,
+          subjectName: subject.name,
+          score,
+          creditsEarned,
+          passed,
+          recordedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      setOpen(false);
+      toast.success(
+        passed
+          ? `Nota registrada · ${credits * 100} ZAMORA acuñados`
+          : "Nota registrada (desaprobada, sin acuñación)",
+        { description: `Tx: ${shortAddress(res.hash, 8)}` },
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al registrar la nota.",
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
   const columns: Column<Grade>[] = [
@@ -182,8 +230,13 @@ export default function ProfessorGradesPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="gradient" onClick={record}>
-                  <GraduationCap className="h-4 w-4" /> Guardar y acuñar
+                <Button variant="gradient" disabled={pending} onClick={record}>
+                  {pending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <GraduationCap className="h-4 w-4" />
+                  )}{" "}
+                  Guardar y acuñar
                 </Button>
               </DialogFooter>
             </DialogContent>

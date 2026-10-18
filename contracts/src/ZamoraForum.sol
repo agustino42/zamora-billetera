@@ -59,17 +59,22 @@ contract ZamoraForum is AccessControl {
         emit TollUpdated(newToll, newThreshold);
     }
 
-    function createPost(bytes32 contentHash) external returns (uint256) {
+    /// @notice Publica en nombre de `author`. El estudiante concede el peaje
+    ///         por `permit` (sin gas) y el relayer envía la tx.
+    function createPost(
+        bytes32 contentHash,
+        address author
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256) {
         if (toll > 0) {
             require(
-                token.transferFrom(msg.sender, address(this), toll),
+                token.transferFrom(author, address(this), toll),
                 "Zamora: peaje rechazado"
             );
         }
         postCount += 1;
         posts[postCount] = Post({
             id: postCount,
-            author: msg.sender,
+            author: author,
             contentHash: contentHash,
             createdAt: block.timestamp,
             upvotes: 0,
@@ -78,17 +83,17 @@ contract ZamoraForum is AccessControl {
             refunded: false,
             removed: false
         });
-        emit PostCreated(postCount, msg.sender, contentHash);
+        emit PostCreated(postCount, author, contentHash);
         return postCount;
     }
 
-    function upvote(uint256 postId) external {
+    function upvote(uint256 postId, address voter) external onlyRole(DEFAULT_ADMIN_ROLE) {
         Post storage p = posts[postId];
         require(!p.removed, "Zamora: post retirado");
-        require(votes[postId][msg.sender] == 0, "Zamora: ya votaste");
-        votes[postId][msg.sender] = 1;
+        require(votes[postId][voter] == 0, "Zamora: ya votaste");
+        votes[postId][voter] = 1;
         p.upvotes += 1;
-        emit Voted(postId, msg.sender, true);
+        emit Voted(postId, voter, true);
         if (!p.refunded && p.tollDeposited > 0 && p.upvotes >= refundThreshold) {
             p.refunded = true;
             token.transfer(p.author, p.tollDeposited);
@@ -96,17 +101,17 @@ contract ZamoraForum is AccessControl {
         }
     }
 
-    function downvote(uint256 postId) external {
+    function downvote(uint256 postId, address voter) external onlyRole(DEFAULT_ADMIN_ROLE) {
         Post storage p = posts[postId];
         require(!p.removed, "Zamora: post retirado");
-        require(votes[postId][msg.sender] == 0, "Zamora: ya votaste");
-        votes[postId][msg.sender] = 2;
+        require(votes[postId][voter] == 0, "Zamora: ya votaste");
+        votes[postId][voter] = 2;
         p.downvotes += 1;
-        emit Voted(postId, msg.sender, false);
+        emit Voted(postId, voter, false);
     }
 
-    function report(uint256 postId) external {
-        reported[postId][msg.sender] = true;
+    function report(uint256 postId, address reporter) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        reported[postId][reporter] = true;
     }
 
     /// @notice Moderación: retira el post y quema el peaje retenido.

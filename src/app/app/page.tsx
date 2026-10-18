@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { AnimatedNumber } from "@/components/student/animated-number";
 import {
+  FaucetDialog,
   ReceiveDialog,
   TransferDialog,
 } from "@/components/student/wallet-actions";
@@ -57,6 +58,7 @@ export default function WalletPage() {
         description="Este es tu panel de billetera ZAMORA y tu progreso del semestre."
         actions={
           <>
+            <FaucetDialog />
             <ReceiveDialog />
             <TransferDialog balance={balance} />
           </>

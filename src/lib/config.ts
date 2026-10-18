@@ -27,6 +27,9 @@ export const CONTRACTS = {
 
 export const isChainConfigured = Boolean(CONTRACTS.token);
 
+export const RELAYER_ADDRESS = (process.env.NEXT_PUBLIC_ZAMORA_RELAYER_ADDRESS ??
+  "") as `0x${string}`;
+
 export const STUDENT_NAV = [
   { href: "/app", label: "Billetera", icon: "wallet" },
   { href: "/app/tasks", label: "Tareas", icon: "tasks" },

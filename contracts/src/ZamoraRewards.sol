@@ -67,15 +67,18 @@ contract ZamoraRewards is AccessControl {
         emit RewardUpdated(rewardId, active);
     }
 
-    function redeem(uint256 rewardId) external {
+    /// @notice Canjea una recompensa para `student`. El estudiante concede la
+    ///         allowance por firma `permit` (sin gas) y el relayer envía la tx.
+    ///         Al canjear se QUEMA ZAMORA del estudiante (sink deflacionario).
+    function redeem(uint256 rewardId, address student) external {
         Reward storage r = rewards[rewardId];
         require(r.active, "Zamora: recompensa inactiva");
         if (r.stock > 0) {
             require(r.redeemed < r.stock, "Zamora: agotado");
         }
         r.redeemed += 1;
-        // Requiere que el estudiante haya aprobado allowance al contrato.
-        token.burnFrom(msg.sender, r.cost, "reward-redeem");
-        emit Redeemed(msg.sender, rewardId, r.cost);
+        // Requiere allowance del estudiante hacia este contrato (vía permit).
+        token.burnFrom(student, r.cost, "reward-redeem");
+        emit Redeemed(student, rewardId, r.cost);
     }
 }

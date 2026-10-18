@@ -16,8 +16,7 @@ export function useZamoraBalance() {
   });
 
   if (isContractConfigured("token") && account && query.data !== undefined) {
-    const decimals = 18;
-    const balance = Number(query.data) / 10 ** decimals;
+    const balance = Number(query.data);
     return { balance, isLoading: query.isLoading, isLive: true };
   }
 

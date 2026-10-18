@@ -90,8 +90,42 @@ Sepolia y Supabase.
                                    Supabase protegidos por RLS.
 ```
 
-Una **system wallet** (server-side, vía `SYSTEM_WALLET_PRIVATE_KEY`) posee los
-roles `ADMIN`, `MINTER` y `BURNER` y firma las operaciones privilegiadas.
+Las acciones on-chain pasan por `POST /api/relay`, que autentica al alumno
+(firma EIP-191) o al staff (sesión Supabase) y ejecuta la transacción con la
+**system wallet**. Ver [Flujo relayerizado](#flujo-relayerizado-gasless-para-el-estudiante).
+
+### Flujo relayerizado (gasless para el estudiante)
+
+El estudiante **nunca firma una transacción ni necesita ETH**: todo lo ejecuta
+la system wallet (el *relayer*).
+
+- **Ganar ZAM** (tarea aprobada, asistencia, notas, faucet): el profesor/admin,
+  o el propio alumno para el faucet, llama a `POST /api/relay`; el contrato
+  acuña directamente a la wallet del estudiante (`mint(student, …)`).
+- **Gastar ZAM** (transfer, boost, peaje de foro, canjear recompensa, inscribir
+  curso): el estudiante firma un **permit EIP-2612** (`signZamoraPermit`, sin
+  gas) autorizando al *spender* correspondiente; el relayer envía el permit y
+  ejecuta la acción (`transferFrom` / `redeem` / `enroll` / `burnFrom`).
+- **Registro**: al iniciar sesión, el relayer llama a `registerStudent` en
+  nombre del alumno.
+
+Cada acción incluye una firma EIP-191 (`address + action + timestamp`, válida
+5 min) que el backend verifica con `viem.verifyMessage`. Las acciones de
+profesor/admin se autentican con la sesión Supabase (o, en modo demo, el header
+`x-zamora-role`).
+
+| Capa | Archivo |
+| --- | --- |
+| API única | `src/app/api/relay/route.ts` |
+| Cliente | `src/lib/onchain/relay-client.ts` (`studentRelay` / `staffRelay`) |
+| Permit | `src/lib/onchain/permit.ts` |
+| Relayer servidor | `src/lib/onchain/server.ts` |
+| Auth | `src/lib/onchain/auth.ts` |
+| Seeder | `src/lib/onchain/seed.ts` |
+
+La acción de staff `seed-demo` crea on-chain las materias, tareas, cursos,
+recompensas y una sesión de asistencia de ejemplo con IDs secuenciales que
+coinciden con los IDs mock de la app (`sub-1` → id `1`, …). Es idempotente.
 
 ---
 
@@ -134,14 +168,25 @@ npm install
 ```
 
 ### 3. Variables de entorno
-Copia la plantilla y complétala:
+Copia la plantilla y complétala en `.env` (raíz del proyecto):
 ```bash
-copy .env.example .env.local     # Windows
-# cp .env.example .env.local     # macOS / Linux
+copy .env.example .env     # Windows
+# cp .env.example .env     # macOS / Linux
 ```
 
-Modo demo: si dejas los valores de Supabase/contratos vacíos, la app funciona
-con datos de ejemplo y login por selección de rol.
+| Variable | Uso |
+| --- | --- |
+| `NEXT_PUBLIC_THIRDWEB_CLIENT_ID` | thirdweb (login In-App Wallet) |
+| `THIRDWEB_SECRET_KEY` | thirdweb server-side |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Auth de profesor/admin |
+| `SYSTEM_WALLET_PRIVATE_KEY` | Relayer: paga el gas y firma las tx |
+| `BASE_SEPOLIA_RPC_URL` | RPC (por defecto `https://sepolia.base.org`) |
+| `BASESCAN_API_KEY` | Verificación de contratos en Basescan |
+| `NEXT_PUBLIC_ZAMORA_RELAYER_ADDRESS` | Dirección pública del relayer |
+| `NEXT_PUBLIC_ZAMORA_*_ADDRESS` | Direcciones de los 6 contratos (tras deploy) |
+
+Modo demo: si dejas Supabase/contratos vacíos, la app funciona con datos de
+ejemplo y login por selección de rol.
 
 ### 4. Ejecutar
 ```bash
@@ -150,13 +195,17 @@ npm run dev
 Abre http://localhost:3000
 
 ### 5. (Opcional) Desplegar contratos
+Fondea la system wallet con ETH de Base Sepolia (el relayer paga todo el gas),
+luego:
 ```bash
 cd contracts
 npm install
 npm run deploy:sepolia
 ```
-El script imprime y escribe las direcciones; cópialas a `.env.local`
-(`NEXT_PUBLIC_ZAMORA_*_ADDRESS`).
+El script concede roles, imprime/escribe las direcciones en `deployments.json` y
+las verifica en Basescan. Cópialas a `.env` (`NEXT_PUBLIC_ZAMORA_*_ADDRESS`) y
+reinicia `npm run dev`. Después llama una vez a la acción `seed-demo`
+(profesor/admin) para crear los datos on-chain de demostración.
 
 ### 6. (Opcional) Configurar Supabase
 Ejecuta `supabase/schema.sql` en el SQL Editor de tu proyecto Supabase.
@@ -169,17 +218,18 @@ Ubicados en `contracts/src/` (Solidity 0.8.24, EVM `cancun`, `viaIR`).
 
 | Contrato | Responsabilidad |
 | --- | --- |
-| `ZamoraToken.sol` | ERC-20 + AccessControl. `mint`/`burn`/`burnFrom` con `MINTER_ROLE` y `BURNER_ROLE`. |
-| `ZamoraCampus.sol` | Roles, materias, inscripciones, tareas, asistencia (código hash), notas-hash y `award`. |
-| `ZamoraRewards.sol` | Catálogo de recompensas y `redeem` que quema ZAM. |
+| `ZamoraToken.sol` | ERC-20 (`decimals = 0`) + `ERC20Permit` + AccessControl. `mint`/`burn`/`burnFrom` (MINTER/BURNER) y `adminBurn` (tesorería). |
+| `ZamoraCampus.sol` | Roles, materias, inscripciones, tareas (`submitTask` on-behalf), asistencia (`checkIn` on-behalf con código hash), notas-hash y `award`. |
+| `ZamoraRewards.sol` | Catálogo de recompensas y `redeem(rewardId, student)` que quema ZAM. |
 | `ZamoraCollectibles.sol` | ERC-721: Pass transferible; Badge y Certificate como SBT. |
-| `ZamoraCourses.sol` | Split 80/20 en `enroll`; `completeCourse` acuña el certificado. |
-| `ZamoraForum.sol` | `createPost` con peaje en escrow, upvote con refund a 5 votos, downvote y quema al remover. |
+| `ZamoraCourses.sol` | `createCourse(…, instructor)`; split 80/20 en `enroll`; `completeCourse` acuña el certificado. |
+| `ZamoraForum.sol` | `createPost`/`upvote`/`downvote` on-behalf; peaje en escrow con refund a 5 votos; quema al remover. |
 
-Compilar:
+`ZamoraToken` usa **0 decimales** (1 ZAM = 1 unidad). Compilar y probar:
 ```bash
 cd contracts
 npm run compile
+npm run test      # 24 tests: permit, on-behalf, SBT, split 80/20, refund, adminBurn…
 ```
 
 ---
@@ -211,6 +261,7 @@ thirdWeb3/
 │   └── schema.sql              # Esquema + RLS
 ├── src/
 │   ├── app/
+│   │   ├── api/relay/          # Endpoint único del relayer
 │   │   ├── page.tsx            # Landing
 │   │   ├── login/              # Login mixto
 │   │   ├── app/                # Panel estudiante
@@ -226,13 +277,15 @@ thirdWeb3/
 │   │   ├── providers.tsx       # Theme + thirdweb + session
 │   │   └── session-provider.tsx
 │   └── lib/
-│       ├── config.ts           # Navegación, contratos, economía
+│       ├── config.ts           # Navegación, contratos, economía, RELAYER_ADDRESS
 │       ├── contracts.ts        # ABIs + getZamoraContract()
+│       ├── onchain/            # units · permit · server · auth · relay-client · seed
 │       ├── thirdweb/           # Cliente thirdweb
 │       ├── supabase/           # Clientes (browser/server/admin)
 │       ├── mock-data.ts        # Datos demo
 │       ├── types.ts            # Tipos compartidos
 │       └── utils.ts            # Helpers (formato, niveles, hash)
+├── contracts/                  # Hardhat: src/ (6 contratos) · test/ (24 tests) · scripts/
 ├── .env.example
 ├── next.config.ts              # Alias webpack "@x402": false
 └── tailwind.config.ts          # Tema brand / ink / gold

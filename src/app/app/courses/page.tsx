@@ -3,7 +3,15 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Award, BookOpen, GraduationCap, ShoppingCart, Users } from "lucide-react";
+import { useActiveAccount } from "thirdweb/react";
+import {
+  Award,
+  BookOpen,
+  GraduationCap,
+  Loader2,
+  ShoppingCart,
+  Users,
+} from "lucide-react";
 import { PageHeader } from "@/components/dashboard/ui";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,24 +19,58 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { demoCourses } from "@/lib/mock-data";
+import { studentRelay } from "@/lib/onchain/relay-client";
+import { shortAddress } from "@/lib/utils";
+
+function onchainId(id: string) {
+  return Number(id.replace(/\D/g, "")) || 0;
+}
 
 export default function CoursesPage() {
+  const account = useActiveAccount();
   const [enrolled, setEnrolled] = useState<string[]>(
     demoCourses.filter((c) => c.enrolledSelf).map((c) => c.id),
   );
   const [claimed, setClaimed] = useState<string[]>([]);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
 
-  const enroll = (id: string, title: string, price: number) => {
-    setEnrolled((prev) => [...prev, id]);
-    toast.success(`Te inscribiste en "${title}"`, {
-      description: `Se descontaron ${price} ZAMORA (80% instructor / 20% quemado).`,
-    });
+  const enroll = async (id: string, title: string, price: number) => {
+    if (!account) {
+      toast.error("Inicia sesión con tu billetera para inscribirte.");
+      return;
+    }
+    const courseId = onchainId(id);
+    if (!courseId) {
+      toast.error("Este curso aún no está on-chain.");
+      return;
+    }
+    setLoadingId(id);
+    try {
+      const res = await studentRelay({
+        account,
+        action: "courses-enroll",
+        amount: price,
+        payload: { courseId },
+      });
+      if (res.ok) {
+        setEnrolled((prev) => [...prev, id]);
+        toast.success(`Te inscribiste en ${title}`, {
+          description: `Tx: ${shortAddress(res.hash, 8)}`,
+        });
+      } else {
+        toast.error(res.error);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Error al inscribir.");
+    } finally {
+      setLoadingId(null);
+    }
   };
 
   const claimCert = (id: string, title: string) => {
     setClaimed((prev) => [...prev, id]);
     toast.success("Certificado emitido", {
-      description: `NFT soulbound verifiable para "${title}".`,
+      description: `NFT soulbound verificable para "${title}".`,
       icon: <Award className="h-4 w-4" />,
     });
   };
@@ -142,9 +184,14 @@ export default function CoursesPage() {
                         <Button
                           size="sm"
                           variant="gradient"
+                          disabled={loadingId === c.id}
                           onClick={() => enroll(c.id, c.title, c.price)}
                         >
-                          <ShoppingCart className="h-4 w-4" />
+                          {loadingId === c.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <ShoppingCart className="h-4 w-4" />
+                          )}
                           Inscribirme
                         </Button>
                       </div>

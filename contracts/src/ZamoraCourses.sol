@@ -71,37 +71,42 @@ contract ZamoraCourses is AccessControl {
         collectibles = ICollectiblesC(collectiblesAddress);
     }
 
+    /// @notice Crea un curso. La firma el relayer (admin) y se indica el
+    ///         instructor explícitamente (no el msg.sender).
     function createCourse(
         string calldata title,
         string calldata description,
         uint256 price,
-        uint256 seats
-    ) external returns (uint256) {
+        uint256 seats,
+        address instructor
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256) {
         courseCount += 1;
         courses[courseCount] = Course({
             id: courseCount,
             title: title,
             description: description,
             price: price,
-            instructor: msg.sender,
+            instructor: instructor,
             seats: seats,
             enrolled: 0,
             completed: 0,
             active: true
         });
-        emit CourseCreated(courseCount, title, price, msg.sender);
+        emit CourseCreated(courseCount, title, price, instructor);
         return courseCount;
     }
 
-    function enroll(uint256 courseId) external {
+    /// @notice Inscribe a `student` pagando con sus ZAMORA (allowance vía
+    ///         permit). Split: `instructorShare`% al instructor, resto quemado.
+    function enroll(uint256 courseId, address student) external {
         Course storage c = courses[courseId];
         require(c.active, "Zamora: curso inactivo");
-        require(!isEnrolled[courseId][msg.sender], "Zamora: ya inscrito");
+        require(!isEnrolled[courseId][student], "Zamora: ya inscrito");
         if (c.seats > 0) {
             require(c.enrolled < c.seats, "Zamora: sin cupos");
         }
         require(
-            token.transferFrom(msg.sender, address(this), c.price),
+            token.transferFrom(student, address(this), c.price),
             "Zamora: pago rechazado"
         );
         uint256 instructorAmount = (c.price * instructorShare) / 100;
@@ -112,9 +117,9 @@ contract ZamoraCourses is AccessControl {
         if (burnAmount > 0) {
             token.burn(burnAmount, "course-burn");
         }
-        isEnrolled[courseId][msg.sender] = true;
+        isEnrolled[courseId][student] = true;
         c.enrolled += 1;
-        emit Enrolled(courseId, msg.sender, c.price);
+        emit Enrolled(courseId, student, c.price);
     }
 
     function completeCourse(

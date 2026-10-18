@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Coins, Flame, Snowflake, TrendingUp } from "lucide-react";
+import { Coins, Flame, Loader2, Snowflake, TrendingUp } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/dashboard/ui";
 import {
   DistributionChart,
@@ -15,20 +15,93 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { demoAdminStats } from "@/lib/mock-data";
+import { demoAdminStats, demoStudents } from "@/lib/mock-data";
 import {
   COURSE_BURN_SHARE,
   COURSE_INSTRUCTOR_SHARE,
   FORUM_TOLL,
   TEACHING_MULTIPLIER,
 } from "@/lib/config";
-import { formatNumber } from "@/lib/utils";
+import { staffRelay } from "@/lib/onchain/relay-client";
+import { formatNumber, shortAddress } from "@/lib/utils";
+
+const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000001";
 
 export default function AdminEconomyPage() {
   const s = demoAdminStats;
   const [mintAmount, setMintAmount] = useState("1000");
   const [burnAmount, setBurnAmount] = useState("1000");
+  const [mintTo, setMintTo] = useState(demoStudents[0].wallet);
+  const [burnFrom, setBurnFrom] = useState(demoStudents[0].wallet);
   const [paused, setPaused] = useState(false);
+  const [pendingMint, setPendingMint] = useState(false);
+  const [pendingBurn, setPendingBurn] = useState(false);
+
+  const mint = async () => {
+    const amount = Number(mintAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Importe de acuñación inválido");
+      return;
+    }
+    const to =
+      mintTo.startsWith("0x") && mintTo.length === 42
+        ? mintTo
+        : PLACEHOLDER_ADDRESS;
+    setPendingMint(true);
+    try {
+      const res = await staffRelay(
+        "treasury-mint",
+        { to, amount, reason: "Acuñación manual desde el panel admin" },
+        "admin",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Acuñados ${amount} ZAM`, {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al acuñar ZAM.",
+      );
+    } finally {
+      setPendingMint(false);
+    }
+  };
+
+  const burn = async () => {
+    const amount = Number(burnAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Importe de quema inválido");
+      return;
+    }
+    const from =
+      burnFrom.startsWith("0x") && burnFrom.length === 42
+        ? burnFrom
+        : PLACEHOLDER_ADDRESS;
+    setPendingBurn(true);
+    try {
+      const res = await staffRelay(
+        "treasury-burn",
+        { from, amount, reason: "Quema manual desde el panel admin" },
+        "admin",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Quemados ${amount} ZAM`, {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al quemar ZAM.",
+      );
+    } finally {
+      setPendingBurn(false);
+    }
+  };
 
   return (
     <div>
@@ -110,6 +183,14 @@ export default function AdminEconomyPage() {
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="space-y-2">
+              <Label htmlFor="mintTo">Destino (wallet)</Label>
+              <Input
+                id="mintTo"
+                value={mintTo}
+                onChange={(e) => setMintTo(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="mint">Acuñar ZAM</Label>
               <div className="flex gap-2">
                 <Input
@@ -120,17 +201,27 @@ export default function AdminEconomyPage() {
                 />
                 <Button
                   variant="gradient"
-                  onClick={() =>
-                    toast.success(`Acuñados ${mintAmount} ZAM`, {
-                      description: "Firmado por la system wallet",
-                    })
-                  }
+                  disabled={pendingMint}
+                  onClick={mint}
                 >
+                  {pendingMint ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Coins className="h-4 w-4" />
+                  )}{" "}
                   Acuñar
                 </Button>
               </div>
             </div>
             <Separator />
+            <div className="space-y-2">
+              <Label htmlFor="burnFrom">Origen (wallet)</Label>
+              <Input
+                id="burnFrom"
+                value={burnFrom}
+                onChange={(e) => setBurnFrom(e.target.value)}
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="burn">Quemar ZAM</Label>
               <div className="flex gap-2">
@@ -142,13 +233,15 @@ export default function AdminEconomyPage() {
                 />
                 <Button
                   variant="outline"
-                  onClick={() =>
-                    toast.success(`Quemados ${burnAmount} ZAM`, {
-                      description: "Reduce la oferta circulante",
-                    })
-                  }
+                  disabled={pendingBurn}
+                  onClick={burn}
                 >
-                  <Flame className="h-4 w-4" /> Quemar
+                  {pendingBurn ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Flame className="h-4 w-4" />
+                  )}{" "}
+                  Quemar
                 </Button>
               </div>
             </div>

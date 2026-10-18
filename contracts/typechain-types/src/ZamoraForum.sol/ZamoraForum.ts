@@ -67,11 +67,11 @@ export interface ZamoraForumInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "createPost",
-    values: [BytesLike]
+    values: [BytesLike, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "downvote",
-    values: [BigNumberish]
+    values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "getRoleAdmin",
@@ -101,7 +101,7 @@ export interface ZamoraForumInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "report",
-    values: [BigNumberish]
+    values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "reported",
@@ -127,7 +127,7 @@ export interface ZamoraForumInterface extends Interface {
   encodeFunctionData(functionFragment: "toll", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "upvote",
-    values: [BigNumberish]
+    values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "votes",
@@ -360,12 +360,16 @@ export interface ZamoraForum extends BaseContract {
   DEFAULT_ADMIN_ROLE: TypedContractMethod<[], [string], "view">;
 
   createPost: TypedContractMethod<
-    [contentHash: BytesLike],
+    [contentHash: BytesLike, author: AddressLike],
     [bigint],
     "nonpayable"
   >;
 
-  downvote: TypedContractMethod<[postId: BigNumberish], [void], "nonpayable">;
+  downvote: TypedContractMethod<
+    [postId: BigNumberish, voter: AddressLike],
+    [void],
+    "nonpayable"
+  >;
 
   getRoleAdmin: TypedContractMethod<[role: BytesLike], [string], "view">;
 
@@ -421,7 +425,11 @@ export interface ZamoraForum extends BaseContract {
     "nonpayable"
   >;
 
-  report: TypedContractMethod<[postId: BigNumberish], [void], "nonpayable">;
+  report: TypedContractMethod<
+    [postId: BigNumberish, reporter: AddressLike],
+    [void],
+    "nonpayable"
+  >;
 
   reported: TypedContractMethod<
     [arg0: BigNumberish, arg1: AddressLike],
@@ -457,7 +465,11 @@ export interface ZamoraForum extends BaseContract {
 
   toll: TypedContractMethod<[], [bigint], "view">;
 
-  upvote: TypedContractMethod<[postId: BigNumberish], [void], "nonpayable">;
+  upvote: TypedContractMethod<
+    [postId: BigNumberish, voter: AddressLike],
+    [void],
+    "nonpayable"
+  >;
 
   votes: TypedContractMethod<
     [arg0: BigNumberish, arg1: AddressLike],
@@ -474,10 +486,18 @@ export interface ZamoraForum extends BaseContract {
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "createPost"
-  ): TypedContractMethod<[contentHash: BytesLike], [bigint], "nonpayable">;
+  ): TypedContractMethod<
+    [contentHash: BytesLike, author: AddressLike],
+    [bigint],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "downvote"
-  ): TypedContractMethod<[postId: BigNumberish], [void], "nonpayable">;
+  ): TypedContractMethod<
+    [postId: BigNumberish, voter: AddressLike],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "getRoleAdmin"
   ): TypedContractMethod<[role: BytesLike], [string], "view">;
@@ -542,7 +562,11 @@ export interface ZamoraForum extends BaseContract {
   >;
   getFunction(
     nameOrSignature: "report"
-  ): TypedContractMethod<[postId: BigNumberish], [void], "nonpayable">;
+  ): TypedContractMethod<
+    [postId: BigNumberish, reporter: AddressLike],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "reported"
   ): TypedContractMethod<
@@ -578,7 +602,11 @@ export interface ZamoraForum extends BaseContract {
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "upvote"
-  ): TypedContractMethod<[postId: BigNumberish], [void], "nonpayable">;
+  ): TypedContractMethod<
+    [postId: BigNumberish, voter: AddressLike],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "votes"
   ): TypedContractMethod<

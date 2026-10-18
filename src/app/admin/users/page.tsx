@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Ban, Coins, ShieldCheck, Users } from "lucide-react";
+import { Ban, Coins, Gift, Loader2, ShieldCheck, Users } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { demoStudents, demoProfessors } from "@/lib/mock-data";
+import { staffRelay } from "@/lib/onchain/relay-client";
 import { shortAddress, formatNumber } from "@/lib/utils";
+
+const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000001";
 
 interface UserRow {
   id: string;
@@ -46,6 +49,7 @@ const initial: UserRow[] = [
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>(initial);
   const [tab, setTab] = useState("all");
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const toggle = (id: string) => {
     setUsers((prev) =>
@@ -56,6 +60,37 @@ export default function AdminUsersPage() {
       ),
     );
     toast.success("Estado actualizado");
+  };
+
+  const award = async (u: UserRow) => {
+    const address =
+      u.wallet.startsWith("0x") && u.wallet.length === 42
+        ? u.wallet
+        : PLACEHOLDER_ADDRESS;
+    setPendingId(u.id);
+    try {
+      const res = await staffRelay(
+        "award",
+        { student: address, amount: 50, reason: `Premio manual: ${u.name}` },
+        "admin",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setUsers((prev) =>
+        prev.map((x) => (x.id === u.id ? { ...x, zamora: x.zamora + 50 } : x)),
+      );
+      toast.success(`50 ZAM premiados a ${u.name}`, {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al premiar.",
+      );
+    } finally {
+      setPendingId(null);
+    }
   };
 
   const filtered =
@@ -104,17 +139,34 @@ export default function AdminUsersPage() {
       key: "actions",
       header: "Acciones",
       render: (u) => (
-        <Button size="sm" variant="outline" onClick={() => toggle(u.id)}>
-          {u.status === "active" ? (
-            <>
-              <Ban className="h-3.5 w-3.5" /> Suspender
-            </>
-          ) : (
-            <>
-              <ShieldCheck className="h-3.5 w-3.5" /> Activar
-            </>
+        <div className="flex flex-wrap gap-2">
+          {u.role === "student" && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pendingId === u.id}
+              onClick={() => award(u)}
+            >
+              {pendingId === u.id ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Gift className="h-3.5 w-3.5" />
+              )}{" "}
+              Premiar 50 ZAM
+            </Button>
           )}
-        </Button>
+          <Button size="sm" variant="outline" onClick={() => toggle(u.id)}>
+            {u.status === "active" ? (
+              <>
+                <Ban className="h-3.5 w-3.5" /> Suspender
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="h-3.5 w-3.5" /> Activar
+              </>
+            )}
+          </Button>
+        </div>
       ),
     },
   ];

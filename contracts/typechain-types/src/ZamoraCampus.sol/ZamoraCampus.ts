@@ -122,7 +122,7 @@ export interface ZamoraCampusInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "checkIn",
-    values: [BigNumberish, string]
+    values: [BigNumberish, string, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "checkedIn",
@@ -246,7 +246,7 @@ export interface ZamoraCampusInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "submitTask",
-    values: [BigNumberish, BytesLike]
+    values: [BigNumberish, BytesLike, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "supportsInterface",
@@ -739,7 +739,7 @@ export interface ZamoraCampus extends BaseContract {
   >;
 
   checkIn: TypedContractMethod<
-    [sessionId: BigNumberish, code: string],
+    [sessionId: BigNumberish, code: string, student: AddressLike],
     [void],
     "nonpayable"
   >;
@@ -952,7 +952,7 @@ export interface ZamoraCampus extends BaseContract {
   >;
 
   submitTask: TypedContractMethod<
-    [taskId: BigNumberish, proofHash: BytesLike],
+    [taskId: BigNumberish, proofHash: BytesLike, student: AddressLike],
     [void],
     "nonpayable"
   >;
@@ -1017,7 +1017,7 @@ export interface ZamoraCampus extends BaseContract {
   getFunction(
     nameOrSignature: "checkIn"
   ): TypedContractMethod<
-    [sessionId: BigNumberish, code: string],
+    [sessionId: BigNumberish, code: string, student: AddressLike],
     [void],
     "nonpayable"
   >;
@@ -1237,7 +1237,7 @@ export interface ZamoraCampus extends BaseContract {
   getFunction(
     nameOrSignature: "submitTask"
   ): TypedContractMethod<
-    [taskId: BigNumberish, proofHash: BytesLike],
+    [taskId: BigNumberish, proofHash: BytesLike, student: AddressLike],
     [void],
     "nonpayable"
   >;

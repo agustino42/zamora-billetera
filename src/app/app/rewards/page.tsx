@@ -3,14 +3,24 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Coins, Gift, ShoppingBag, Ticket, Trophy, Utensils } from "lucide-react";
+import { useActiveAccount } from "thirdweb/react";
+import {
+  Coins,
+  Gift,
+  Loader2,
+  ShoppingBag,
+  Ticket,
+  Trophy,
+  Utensils,
+} from "lucide-react";
 import { PageHeader } from "@/components/dashboard/ui";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { demoRewards } from "@/lib/mock-data";
 import { useZamoraBalance } from "@/lib/hooks/use-zamora-balance";
-import { cn } from "@/lib/utils";
+import { studentRelay } from "@/lib/onchain/relay-client";
+import { cn, shortAddress } from "@/lib/utils";
 import type { Reward } from "@/lib/types";
 
 const CATEGORY_ICON: Record<Reward["category"], typeof Gift> = {
@@ -21,21 +31,53 @@ const CATEGORY_ICON: Record<Reward["category"], typeof Gift> = {
   servicio: ShoppingBag,
 };
 
+function onchainId(id: string) {
+  return Number(id.replace(/\D/g, "")) || 0;
+}
+
 export default function RewardsPage() {
+  const account = useActiveAccount();
   const { balance } = useZamoraBalance();
   const [redeemed, setRedeemed] = useState<string[]>([]);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
 
-  const redeem = (r: Reward) => {
+  const redeem = async (r: Reward) => {
     if (r.cost > balance) {
       toast.error("Saldo insuficiente", {
         description: `Necesitas ${r.cost} ZAM y tienes ${balance.toFixed(0)}.`,
       });
       return;
     }
-    setRedeemed((prev) => [...prev, r.id]);
-    toast.success(`Canjeaste "${r.name}"`, {
-      description: `Se quemaron ${r.cost} ZAMORA.`,
-    });
+    if (!account) {
+      toast.error("Inicia sesión con tu billetera para canjear.");
+      return;
+    }
+    const rewardId = onchainId(r.id);
+    if (!rewardId) {
+      toast.error("Esta recompensa aún no está on-chain.");
+      return;
+    }
+    setLoadingId(r.id);
+    try {
+      const res = await studentRelay({
+        account,
+        action: "rewards-redeem",
+        amount: r.cost,
+        payload: { rewardId },
+      });
+      if (res.ok) {
+        setRedeemed((prev) => [...prev, r.id]);
+        toast.success(`Canjeaste ${r.name}`, {
+          description: `Tx: ${shortAddress(res.hash, 8)}`,
+        });
+      } else {
+        toast.error(res.error);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Error al canjear.");
+    } finally {
+      setLoadingId(null);
+    }
   };
 
   return (
@@ -93,10 +135,13 @@ export default function RewardsPage() {
                     <Button
                       variant={affordable ? "gradient" : "outline"}
                       size="sm"
-                      disabled={isRedeemed}
+                      disabled={isRedeemed || loadingId === r.id}
                       onClick={() => redeem(r)}
                       className={cn(!affordable && "opacity-70")}
                     >
+                      {loadingId === r.id && (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      )}
                       {isRedeemed ? "Canjeado" : "Canjear"}
                     </Button>
                   </div>

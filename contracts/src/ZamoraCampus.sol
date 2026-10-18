@@ -211,19 +211,24 @@ contract ZamoraCampus is AccessControl {
         return taskCount;
     }
 
-    function submitTask(uint256 taskId, bytes32 proofHash) external {
-        require(hasRole(STUDENT_ROLE, msg.sender), "Zamora: solo estudiante");
+    /// @notice Registra una entrega en nombre del estudiante. La firma el
+    ///         relayer (profesor/admin), de modo que el alumno no paga gas.
+    function submitTask(
+        uint256 taskId,
+        bytes32 proofHash,
+        address student
+    ) external onlyProfessorOrAdmin {
         require(tasks[taskId].active, "Zamora: tarea inactiva");
         submissionCount += 1;
         submissions[submissionCount] = Submission({
             id: submissionCount,
             taskId: taskId,
-            student: msg.sender,
+            student: student,
             proofHash: proofHash,
             approved: false,
             rejected: false
         });
-        emit TaskSubmitted(submissionCount, taskId, msg.sender);
+        emit TaskSubmitted(submissionCount, taskId, student);
     }
 
     function approveSubmission(uint256 submissionId) external onlyProfessorOrAdmin {
@@ -262,16 +267,21 @@ contract ZamoraCampus is AccessControl {
         return sessionCount;
     }
 
-    function checkIn(uint256 sessionId, string calldata code) external {
-        require(hasRole(STUDENT_ROLE, msg.sender), "Zamora: solo estudiante");
+    /// @notice Marca asistencia en nombre del estudiante. La firma el relayer
+    ///         (profesor/admin); el código sigue validándose on-chain.
+    function checkIn(
+        uint256 sessionId,
+        string calldata code,
+        address student
+    ) external onlyProfessorOrAdmin {
         Session storage s = sessions[sessionId];
         require(!s.closed, "Zamora: sesion cerrada");
         require(block.timestamp <= s.closesAt, "Zamora: fuera de tiempo");
         require(keccak256(abi.encodePacked(code)) == s.codeHash, "Zamora: codigo invalido");
-        require(!checkedIn[sessionId][msg.sender], "Zamora: ya registrado");
-        checkedIn[sessionId][msg.sender] = true;
-        token.mint(msg.sender, attendanceReward, "attendance");
-        emit AttendanceCheckedIn(sessionId, msg.sender);
+        require(!checkedIn[sessionId][student], "Zamora: ya registrado");
+        checkedIn[sessionId][student] = true;
+        token.mint(student, attendanceReward, "attendance");
+        emit AttendanceCheckedIn(sessionId, student);
     }
 
     function closeAttendance(uint256 sessionId) external onlyProfessorOrAdmin {

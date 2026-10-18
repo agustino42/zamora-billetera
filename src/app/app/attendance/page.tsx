@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { useActiveAccount } from "thirdweb/react";
 import {
   CalendarCheck,
   CheckCircle2,
   Clock,
   KeyRound,
+  Loader2,
   QrCode,
   XCircle,
 } from "lucide-react";
@@ -26,14 +28,17 @@ import {
   demoAttendanceSessions,
   demoProfile,
 } from "@/lib/mock-data";
-import { formatDate, relativeTime } from "@/lib/utils";
+import { studentRelay } from "@/lib/onchain/relay-client";
+import { formatDate, relativeTime, shortAddress } from "@/lib/utils";
 
 export default function AttendancePage() {
+  const account = useActiveAccount();
   const [code, setCode] = useState("");
   const [checked, setChecked] = useState<string[]>([]);
+  const [sending, setSending] = useState(false);
   const active = demoAttendanceSessions.find((s) => !s.closed && new Date(s.closesAt) > new Date());
 
-  const doCheckIn = () => {
+  const doCheckIn = async () => {
     if (!active) return;
     if (code.trim().toUpperCase() !== active.code) {
       toast.error("Código incorrecto", {
@@ -45,11 +50,36 @@ export default function AttendancePage() {
       toast.info("Ya registraste tu asistencia en esta sesión");
       return;
     }
-    setChecked((prev) => [...prev, active.id]);
-    toast.success("Asistencia registrada · +10 ZAMORA", {
-      description: active.subjectName,
-    });
-    setCode("");
+    if (!account) {
+      toast.error("Inicia sesión con tu billetera para marcar asistencia.");
+      return;
+    }
+    const sessionId = Number(active.id.replace(/\D/g, "")) || 0;
+    if (!sessionId) {
+      toast.error("Esta sesión aún no está on-chain.");
+      return;
+    }
+    setSending(true);
+    try {
+      const res = await studentRelay({
+        account,
+        action: "attendance-checkin",
+        payload: { sessionId, code: active.code },
+      });
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      setChecked((prev) => [...prev, active.id]);
+      toast.success("Asistencia registrada · +10 ZAMORA", {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+      setCode("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Error al marcar.");
+    } finally {
+      setSending(false);
+    }
   };
 
   const present = demoAttendanceRecords.filter((r) => r.present).length;
@@ -100,8 +130,12 @@ export default function AttendancePage() {
                       className="pl-10 font-mono tracking-widest uppercase"
                     />
                   </div>
-                  <Button variant="gradient" onClick={doCheckIn}>
-                    <CalendarCheck className="h-4 w-4" />
+                  <Button variant="gradient" onClick={doCheckIn} disabled={sending}>
+                    {sending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CalendarCheck className="h-4 w-4" />
+                    )}
                     Marcar asistencia
                   </Button>
                 </div>

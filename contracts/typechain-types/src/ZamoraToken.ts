@@ -28,18 +28,23 @@ export interface ZamoraTokenInterface extends Interface {
     nameOrSignature:
       | "BURNER_ROLE"
       | "DEFAULT_ADMIN_ROLE"
+      | "DOMAIN_SEPARATOR"
       | "MINTER_ROLE"
+      | "adminBurn"
       | "allowance"
       | "approve"
       | "balanceOf"
       | "burn"
       | "burnFrom"
       | "decimals"
+      | "eip712Domain"
       | "getRoleAdmin"
       | "grantRole"
       | "hasRole"
       | "mint"
       | "name"
+      | "nonces"
+      | "permit"
       | "renounceRole"
       | "revokeRole"
       | "supportsInterface"
@@ -53,6 +58,7 @@ export interface ZamoraTokenInterface extends Interface {
     nameOrSignatureOrTopic:
       | "Approval"
       | "Burned"
+      | "EIP712DomainChanged"
       | "Minted"
       | "RoleAdminChanged"
       | "RoleGranted"
@@ -69,8 +75,16 @@ export interface ZamoraTokenInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "DOMAIN_SEPARATOR",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "MINTER_ROLE",
     values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "adminBurn",
+    values: [AddressLike, BigNumberish, string]
   ): string;
   encodeFunctionData(
     functionFragment: "allowance",
@@ -94,6 +108,10 @@ export interface ZamoraTokenInterface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "decimals", values?: undefined): string;
   encodeFunctionData(
+    functionFragment: "eip712Domain",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "getRoleAdmin",
     values: [BytesLike]
   ): string;
@@ -110,6 +128,19 @@ export interface ZamoraTokenInterface extends Interface {
     values: [AddressLike, BigNumberish, string]
   ): string;
   encodeFunctionData(functionFragment: "name", values?: undefined): string;
+  encodeFunctionData(functionFragment: "nonces", values: [AddressLike]): string;
+  encodeFunctionData(
+    functionFragment: "permit",
+    values: [
+      AddressLike,
+      AddressLike,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish,
+      BytesLike,
+      BytesLike
+    ]
+  ): string;
   encodeFunctionData(
     functionFragment: "renounceRole",
     values: [BytesLike, AddressLike]
@@ -145,15 +176,24 @@ export interface ZamoraTokenInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "DOMAIN_SEPARATOR",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "MINTER_ROLE",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "adminBurn", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "allowance", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "approve", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "burn", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "burnFrom", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "decimals", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "eip712Domain",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "getRoleAdmin",
     data: BytesLike
@@ -162,6 +202,8 @@ export interface ZamoraTokenInterface extends Interface {
   decodeFunctionResult(functionFragment: "hasRole", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "mint", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "name", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "nonces", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "permit", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "renounceRole",
     data: BytesLike
@@ -213,6 +255,16 @@ export namespace BurnedEvent {
     amount: bigint;
     reason: string;
   }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace EIP712DomainChangedEvent {
+  export type InputTuple = [];
+  export type OutputTuple = [];
+  export interface OutputObject {}
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
   export type Log = TypedEventLog<Event>;
@@ -360,7 +412,15 @@ export interface ZamoraToken extends BaseContract {
 
   DEFAULT_ADMIN_ROLE: TypedContractMethod<[], [string], "view">;
 
+  DOMAIN_SEPARATOR: TypedContractMethod<[], [string], "view">;
+
   MINTER_ROLE: TypedContractMethod<[], [string], "view">;
+
+  adminBurn: TypedContractMethod<
+    [from: AddressLike, amount: BigNumberish, reason: string],
+    [void],
+    "nonpayable"
+  >;
 
   allowance: TypedContractMethod<
     [owner: AddressLike, spender: AddressLike],
@@ -390,6 +450,22 @@ export interface ZamoraToken extends BaseContract {
 
   decimals: TypedContractMethod<[], [bigint], "view">;
 
+  eip712Domain: TypedContractMethod<
+    [],
+    [
+      [string, string, string, bigint, string, string, bigint[]] & {
+        fields: string;
+        name: string;
+        version: string;
+        chainId: bigint;
+        verifyingContract: string;
+        salt: string;
+        extensions: bigint[];
+      }
+    ],
+    "view"
+  >;
+
   getRoleAdmin: TypedContractMethod<[role: BytesLike], [string], "view">;
 
   grantRole: TypedContractMethod<
@@ -411,6 +487,22 @@ export interface ZamoraToken extends BaseContract {
   >;
 
   name: TypedContractMethod<[], [string], "view">;
+
+  nonces: TypedContractMethod<[owner: AddressLike], [bigint], "view">;
+
+  permit: TypedContractMethod<
+    [
+      owner: AddressLike,
+      spender: AddressLike,
+      value: BigNumberish,
+      deadline: BigNumberish,
+      v: BigNumberish,
+      r: BytesLike,
+      s: BytesLike
+    ],
+    [void],
+    "nonpayable"
+  >;
 
   renounceRole: TypedContractMethod<
     [role: BytesLike, callerConfirmation: AddressLike],
@@ -457,8 +549,18 @@ export interface ZamoraToken extends BaseContract {
     nameOrSignature: "DEFAULT_ADMIN_ROLE"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "DOMAIN_SEPARATOR"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "MINTER_ROLE"
   ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "adminBurn"
+  ): TypedContractMethod<
+    [from: AddressLike, amount: BigNumberish, reason: string],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "allowance"
   ): TypedContractMethod<
@@ -494,6 +596,23 @@ export interface ZamoraToken extends BaseContract {
     nameOrSignature: "decimals"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
+    nameOrSignature: "eip712Domain"
+  ): TypedContractMethod<
+    [],
+    [
+      [string, string, string, bigint, string, string, bigint[]] & {
+        fields: string;
+        name: string;
+        version: string;
+        chainId: bigint;
+        verifyingContract: string;
+        salt: string;
+        extensions: bigint[];
+      }
+    ],
+    "view"
+  >;
+  getFunction(
     nameOrSignature: "getRoleAdmin"
   ): TypedContractMethod<[role: BytesLike], [string], "view">;
   getFunction(
@@ -520,6 +639,24 @@ export interface ZamoraToken extends BaseContract {
   getFunction(
     nameOrSignature: "name"
   ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "nonces"
+  ): TypedContractMethod<[owner: AddressLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "permit"
+  ): TypedContractMethod<
+    [
+      owner: AddressLike,
+      spender: AddressLike,
+      value: BigNumberish,
+      deadline: BigNumberish,
+      v: BigNumberish,
+      r: BytesLike,
+      s: BytesLike
+    ],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "renounceRole"
   ): TypedContractMethod<
@@ -571,6 +708,13 @@ export interface ZamoraToken extends BaseContract {
     BurnedEvent.InputTuple,
     BurnedEvent.OutputTuple,
     BurnedEvent.OutputObject
+  >;
+  getEvent(
+    key: "EIP712DomainChanged"
+  ): TypedContractEvent<
+    EIP712DomainChangedEvent.InputTuple,
+    EIP712DomainChangedEvent.OutputTuple,
+    EIP712DomainChangedEvent.OutputObject
   >;
   getEvent(
     key: "Minted"
@@ -629,6 +773,17 @@ export interface ZamoraToken extends BaseContract {
       BurnedEvent.InputTuple,
       BurnedEvent.OutputTuple,
       BurnedEvent.OutputObject
+    >;
+
+    "EIP712DomainChanged()": TypedContractEvent<
+      EIP712DomainChangedEvent.InputTuple,
+      EIP712DomainChangedEvent.OutputTuple,
+      EIP712DomainChangedEvent.OutputObject
+    >;
+    EIP712DomainChanged: TypedContractEvent<
+      EIP712DomainChangedEvent.InputTuple,
+      EIP712DomainChangedEvent.OutputTuple,
+      EIP712DomainChangedEvent.OutputObject
     >;
 
     "Minted(address,uint256,string)": TypedContractEvent<

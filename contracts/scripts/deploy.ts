@@ -83,6 +83,7 @@ async function main() {
   console.log("\n=== Pega esto en tu .env ===\n" + envBlock);
 
   const outPath = path.join(__dirname, "..", "deployments.json");
+  const deployBlock = await ethers.provider.getBlockNumber();
   fs.writeFileSync(
     outPath,
     JSON.stringify(
@@ -90,6 +91,7 @@ async function main() {
         network: "baseSepolia",
         chainId: 84532,
         admin,
+        deployBlock,
         contracts: {
           token: tokenAddress,
           campus: campusAddress,

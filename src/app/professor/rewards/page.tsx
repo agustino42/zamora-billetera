@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -19,10 +19,13 @@ import { Input, Textarea } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { demoRewards } from "@/lib/mock-data";
 import type { Reward } from "@/lib/types";
+import { staffRelay } from "@/lib/onchain/relay-client";
+import { shortAddress } from "@/lib/utils";
 
 export default function ProfessorRewardsPage() {
   const [rewards, setRewards] = useState<Reward[]>(demoRewards);
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
   const [form, setForm] = useState({
     name: "",
     description: "",
@@ -30,27 +33,53 @@ export default function ProfessorRewardsPage() {
     stock: "20",
   });
 
-  const create = () => {
+  const create = async () => {
     if (!form.name) {
       toast.error("Escribe un nombre");
       return;
     }
-    setRewards((prev) => [
-      {
-        id: `rw-${Date.now()}`,
-        name: form.name,
-        description: form.description || "Recompensa del curso",
-        cost: Number(form.cost) || 0,
-        stock: Number(form.stock) || 0,
-        redeemed: 0,
-        category: "servicio",
-        active: true,
-      },
-      ...prev,
-    ]);
-    setOpen(false);
-    setForm({ name: "", description: "", cost: "50", stock: "20" });
-    toast.success("Recompensa publicada");
+    const name = form.name;
+    const description = form.description || "Recompensa del curso";
+    const cost = Number(form.cost) || 0;
+    const stock = Number(form.stock) || 0;
+    setPending(true);
+    try {
+      const res = await staffRelay(
+        "reward-create",
+        { name, description, cost, stock },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setRewards((prev) => [
+        {
+          id: `rw-${Date.now()}`,
+          name,
+          description,
+          cost,
+          stock,
+          redeemed: 0,
+          category: "servicio",
+          active: true,
+        },
+        ...prev,
+      ]);
+      setOpen(false);
+      setForm({ name: "", description: "", cost: "50", stock: "20" });
+      toast.success("Recompensa publicada on-chain", {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Error al crear la recompensa.",
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
   const columns: Column<Reward>[] = [
@@ -149,7 +178,8 @@ export default function ProfessorRewardsPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="gradient" onClick={create}>
+                <Button variant="gradient" disabled={pending} onClick={create}>
+                  {pending && <Loader2 className="h-4 w-4 animate-spin" />}
                   Publicar
                 </Button>
               </DialogFooter>

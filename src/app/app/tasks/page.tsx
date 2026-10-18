@@ -3,10 +3,13 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { useActiveAccount } from "thirdweb/react";
+import { keccak256, toBytes } from "viem";
 import {
   CheckCircle2,
   Clock,
   FileUp,
+  Loader2,
   PartyPopper,
   Send,
   Sparkles,
@@ -29,8 +32,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/input";
 import { demoTasks } from "@/lib/mock-data";
+import { studentRelay } from "@/lib/onchain/relay-client";
 import type { Task, TaskStatus } from "@/lib/types";
-import { formatDate, cn } from "@/lib/utils";
+import { formatDate, cn, shortAddress } from "@/lib/utils";
 
 const STATUS_META: Record<
   TaskStatus,
@@ -51,6 +55,7 @@ const FILTERS: { value: string; label: string }[] = [
 ];
 
 export default function TasksPage() {
+  const account = useActiveAccount();
   const [tasks, setTasks] = useState<Task[]>(demoTasks);
   const [filter, setFilter] = useState("all");
   const [submitOpen, setSubmitOpen] = useState(false);
@@ -58,6 +63,7 @@ export default function TasksPage() {
   const [proof, setProof] = useState("");
   const [comment, setComment] = useState("");
   const [claimed, setClaimed] = useState<string[]>([]);
+  const [sending, setSending] = useState(false);
 
   const filtered =
     filter === "all" ? tasks : tasks.filter((t) => t.status === filter);
@@ -69,19 +75,45 @@ export default function TasksPage() {
     setSubmitOpen(true);
   };
 
-  const doSubmit = () => {
+  const doSubmit = async () => {
     if (!activeTask) return;
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === activeTask.id
-          ? { ...t, status: "submitted", proofHash: `0x${Date.now().toString(16)}…` }
-          : t,
-      ),
-    );
-    setSubmitOpen(false);
-    toast.success("Entrega enviada", {
-      description: "Tu profesor la revisará pronto.",
-    });
+    if (!account) {
+      toast.error("Inicia sesión con tu billetera para enviar.");
+      return;
+    }
+    const taskId = Number(activeTask.id.replace(/\D/g, "")) || 0;
+    if (!taskId) {
+      toast.error("Esta tarea aún no está on-chain.");
+      return;
+    }
+    setSending(true);
+    try {
+      const proofHash = keccak256(toBytes(`${proof}|${comment}`));
+      const res = await studentRelay({
+        account,
+        action: "submit-task",
+        payload: { taskId, proofHash },
+      });
+      if (res.ok) {
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === activeTask.id
+              ? { ...t, status: "submitted", proofHash: shortAddress(proofHash, 8) }
+              : t,
+          ),
+        );
+        setSubmitOpen(false);
+        toast.success("Entrega enviada on-chain", {
+          description: `Tx: ${shortAddress(res.hash, 8)}`,
+        });
+      } else {
+        toast.error(res.error);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Error al enviar.");
+    } finally {
+      setSending(false);
+    }
   };
 
   const claim = (task: Task) => {
@@ -236,8 +268,12 @@ export default function TasksPage() {
             </p>
           </div>
           <DialogFooter>
-            <Button variant="gradient" onClick={doSubmit}>
-              <Send className="h-4 w-4" />
+            <Button variant="gradient" onClick={doSubmit} disabled={sending}>
+              {sending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
               Enviar entrega
             </Button>
           </DialogFooter>

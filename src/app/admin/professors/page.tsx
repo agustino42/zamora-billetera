@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Copy, KeyRound, Plus, UserCog } from "lucide-react";
+import { Copy, Gift, KeyRound, Loader2, Plus, UserCog } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { demoProfessors } from "@/lib/mock-data";
+import { staffRelay } from "@/lib/onchain/relay-client";
+import { shortAddress } from "@/lib/utils";
+
+const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000001";
 
 interface Professor {
   id: string;
@@ -44,6 +48,36 @@ export default function AdminProfessorsPage() {
   const [created, setCreated] = useState<{ email: string; password: string } | null>(
     null,
   );
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  const award = async (p: Professor) => {
+    const wallet = p.wallet ?? "";
+    const address =
+      wallet.startsWith("0x") && wallet.length === 42
+        ? wallet
+        : PLACEHOLDER_ADDRESS;
+    setPendingId(p.id);
+    try {
+      const res = await staffRelay(
+        "award",
+        { student: address, amount: 50, reason: `Reconocimiento docente: ${p.name}` },
+        "admin",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`50 ZAM premiados a ${p.name}`, {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al premiar.",
+      );
+    } finally {
+      setPendingId(null);
+    }
+  };
 
   const create = () => {
     if (!form.name || !form.email) {
@@ -117,6 +151,25 @@ export default function AdminProfessorsPage() {
         <Badge variant={p.active ? "success" : "muted"}>
           {p.active ? "Activo" : "Inactivo"}
         </Badge>
+      ),
+    },
+    {
+      key: "actions",
+      header: "Acciones",
+      render: (p) => (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={pendingId === p.id}
+          onClick={() => award(p)}
+        >
+          {pendingId === p.id ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Gift className="h-3.5 w-3.5" />
+          )}{" "}
+          Premiar 50 ZAM
+        </Button>
       ),
     },
   ];

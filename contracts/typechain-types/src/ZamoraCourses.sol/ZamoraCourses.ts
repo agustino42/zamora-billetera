@@ -88,11 +88,11 @@ export interface ZamoraCoursesInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "createCourse",
-    values: [string, string, BigNumberish, BigNumberish]
+    values: [string, string, BigNumberish, BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "enroll",
-    values: [BigNumberish]
+    values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "getRoleAdmin",
@@ -413,13 +413,18 @@ export interface ZamoraCourses extends BaseContract {
       title: string,
       description: string,
       price: BigNumberish,
-      seats: BigNumberish
+      seats: BigNumberish,
+      instructor: AddressLike
     ],
     [bigint],
     "nonpayable"
   >;
 
-  enroll: TypedContractMethod<[courseId: BigNumberish], [void], "nonpayable">;
+  enroll: TypedContractMethod<
+    [courseId: BigNumberish, student: AddressLike],
+    [void],
+    "nonpayable"
+  >;
 
   getRoleAdmin: TypedContractMethod<[role: BytesLike], [string], "view">;
 
@@ -541,14 +546,19 @@ export interface ZamoraCourses extends BaseContract {
       title: string,
       description: string,
       price: BigNumberish,
-      seats: BigNumberish
+      seats: BigNumberish,
+      instructor: AddressLike
     ],
     [bigint],
     "nonpayable"
   >;
   getFunction(
     nameOrSignature: "enroll"
-  ): TypedContractMethod<[courseId: BigNumberish], [void], "nonpayable">;
+  ): TypedContractMethod<
+    [courseId: BigNumberish, student: AddressLike],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "getRoleAdmin"
   ): TypedContractMethod<[role: BytesLike], [string], "view">;

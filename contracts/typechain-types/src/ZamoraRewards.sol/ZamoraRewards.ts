@@ -74,7 +74,7 @@ export interface ZamoraRewardsInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "redeem",
-    values: [BigNumberish]
+    values: [BigNumberish, AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "renounceRole",
@@ -320,7 +320,11 @@ export interface ZamoraRewards extends BaseContract {
     "view"
   >;
 
-  redeem: TypedContractMethod<[rewardId: BigNumberish], [void], "nonpayable">;
+  redeem: TypedContractMethod<
+    [rewardId: BigNumberish, student: AddressLike],
+    [void],
+    "nonpayable"
+  >;
 
   renounceRole: TypedContractMethod<
     [role: BytesLike, callerConfirmation: AddressLike],
@@ -410,7 +414,11 @@ export interface ZamoraRewards extends BaseContract {
   >;
   getFunction(
     nameOrSignature: "redeem"
-  ): TypedContractMethod<[rewardId: BigNumberish], [void], "nonpayable">;
+  ): TypedContractMethod<
+    [rewardId: BigNumberish, student: AddressLike],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "renounceRole"
   ): TypedContractMethod<

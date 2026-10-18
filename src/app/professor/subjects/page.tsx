@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -19,33 +19,60 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { demoSubjects } from "@/lib/mock-data";
 import type { Subject } from "@/lib/types";
+import { staffRelay } from "@/lib/onchain/relay-client";
+import { shortAddress } from "@/lib/utils";
+
+const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000001";
 
 export default function ProfessorSubjectsPage() {
   const [subjects, setSubjects] = useState<Subject[]>(demoSubjects);
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
   const [form, setForm] = useState({ code: "", name: "", credits: "3" });
 
-  const create = () => {
+  const create = async () => {
     if (!form.code || !form.name) {
       toast.error("Completa código y nombre");
       return;
     }
-    setSubjects((prev) => [
-      {
-        id: `sub-${Date.now()}`,
-        code: form.code.toUpperCase(),
-        name: form.name,
-        credits: Number(form.credits) || 3,
-        professorId: "me",
-        professorName: "Tú",
-        color: "#FF6A00",
-        enrolled: 0,
-      },
-      ...prev,
-    ]);
-    setOpen(false);
-    setForm({ code: "", name: "", credits: "3" });
-    toast.success("Materia creada on-chain");
+    const code = form.code.toUpperCase();
+    const credits = Number(form.credits) || 3;
+    setPending(true);
+    try {
+      const res = await staffRelay(
+        "subject-create",
+        { code, name: form.name, credits, professor: PLACEHOLDER_ADDRESS },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setSubjects((prev) => [
+        {
+          id: `sub-${Date.now()}`,
+          code,
+          name: form.name,
+          credits,
+          professorId: "me",
+          professorName: "Tú",
+          color: "#FF6A00",
+          enrolled: 0,
+        },
+        ...prev,
+      ]);
+      setOpen(false);
+      setForm({ code: "", name: "", credits: "3" });
+      toast.success("Materia creada on-chain", {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al crear la materia.",
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
   const columns: Column<Subject>[] = [
@@ -123,7 +150,8 @@ export default function ProfessorSubjectsPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="gradient" onClick={create}>
+                <Button variant="gradient" disabled={pending} onClick={create}>
+                  {pending && <Loader2 className="h-4 w-4 animate-spin" />}
                   Crear materia
                 </Button>
               </DialogFooter>

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { PageHeader, StatCard } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -22,12 +22,17 @@ import { Label } from "@/components/ui/label";
 import { useSession } from "@/components/session-provider";
 import { demoCourses } from "@/lib/mock-data";
 import type { Course } from "@/lib/types";
+import { staffRelay } from "@/lib/onchain/relay-client";
+import { shortAddress } from "@/lib/utils";
 import { COURSE_BURN_SHARE, COURSE_INSTRUCTOR_SHARE } from "@/lib/config";
+
+const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000001";
 
 export default function ProfessorCoursesPage() {
   const { session } = useSession();
   const [courses, setCourses] = useState<Course[]>(demoCourses);
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -39,31 +44,59 @@ export default function ProfessorCoursesPage() {
   const earnings = 3480;
   const royalties = Math.round((earnings * COURSE_INSTRUCTOR_SHARE) / 100);
 
-  const create = () => {
+  const create = async () => {
     if (!form.title) {
       toast.error("Escribe un título");
       return;
     }
-    setCourses((prev) => [
-      {
-        id: `crs-${Date.now()}`,
-        title: form.title,
-        description: form.description || "Nuevo curso",
-        price: Number(form.price) || 0,
-        instructorId: "me",
-        instructorName: session?.name ?? "Tú",
-        seats: Number(form.seats) || 0,
-        enrolled: 0,
-        completed: 0,
-        progress: 0,
-        enrolledSelf: false,
-        category: form.category,
-      },
-      ...prev,
-    ]);
-    setOpen(false);
-    setForm({ ...form, title: "", description: "" });
-    toast.success("Curso creado y listado en el catálogo");
+    const title = form.title;
+    const description = form.description || "Nuevo curso";
+    const price = Number(form.price) || 0;
+    const seats = Number(form.seats) || 0;
+    const instructor =
+      session?.wallet.startsWith("0x") && session.wallet.length === 42
+        ? session.wallet
+        : PLACEHOLDER_ADDRESS;
+    setPending(true);
+    try {
+      const res = await staffRelay(
+        "course-create",
+        { title, description, price, seats, instructor },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setCourses((prev) => [
+        {
+          id: `crs-${Date.now()}`,
+          title,
+          description,
+          price,
+          instructorId: "me",
+          instructorName: session?.name ?? "Tú",
+          seats,
+          enrolled: 0,
+          completed: 0,
+          progress: 0,
+          enrolledSelf: false,
+          category: form.category,
+        },
+        ...prev,
+      ]);
+      setOpen(false);
+      setForm({ ...form, title: "", description: "" });
+      toast.success("Curso creado on-chain", {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al crear el curso.",
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
   const columns: Column<Course>[] = [
@@ -166,7 +199,8 @@ export default function ProfessorCoursesPage() {
                 </div>
               </div>
               <DialogFooter>
-                <Button variant="gradient" onClick={create}>
+                <Button variant="gradient" disabled={pending} onClick={create}>
+                  {pending && <Loader2 className="h-4 w-4 animate-spin" />}
                   Publicar curso
                 </Button>
               </DialogFooter>

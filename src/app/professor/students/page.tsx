@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Coins } from "lucide-react";
+import { Coins, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/dashboard/ui";
 import { DataTable, type Column } from "@/components/dashboard/data-table";
 import { Button } from "@/components/ui/button";
@@ -20,20 +20,51 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { demoStudents } from "@/lib/mock-data";
 import type { Profile } from "@/lib/types";
+import { staffRelay } from "@/lib/onchain/relay-client";
 import { shortAddress } from "@/lib/utils";
+
+const PLACEHOLDER_ADDRESS = "0x0000000000000000000000000000000000000001";
 
 export default function ProfessorStudentsPage() {
   const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
   const [target, setTarget] = useState<Profile | null>(null);
   const [amount, setAmount] = useState("20");
   const [reason, setReason] = useState("Participación destacada");
 
-  const award = () => {
+  const award = async () => {
     if (!target) return;
-    toast.success(`Otorgaste ${amount} ZAMORA a ${target.name}`, {
-      description: reason,
-    });
-    setOpen(false);
+    const amountNum = Number(amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      toast.error("Cantidad inválida");
+      return;
+    }
+    const studentAddress =
+      target.wallet.startsWith("0x") && target.wallet.length === 42
+        ? target.wallet
+        : PLACEHOLDER_ADDRESS;
+    setPending(true);
+    try {
+      const res = await staffRelay(
+        "award",
+        { student: studentAddress, amount: amountNum, reason: reason || "premio" },
+        "professor",
+      );
+      if (res.ok === false) {
+        toast.error(res.error);
+        return;
+      }
+      setOpen(false);
+      toast.success(`Otorgaste ${amount} ZAMORA a ${target.name}`, {
+        description: `Tx: ${shortAddress(res.hash, 8)}`,
+      });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error al otorgar ZAMORA.",
+      );
+    } finally {
+      setPending(false);
+    }
   };
 
   const columns: Column<Profile>[] = [
@@ -142,8 +173,13 @@ export default function ProfessorStudentsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="gradient" onClick={award}>
-              <Coins className="h-4 w-4" /> Acuñar recompensa
+            <Button variant="gradient" disabled={pending} onClick={award}>
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Coins className="h-4 w-4" />
+              )}{" "}
+              Acuñar recompensa
             </Button>
           </DialogFooter>
         </DialogContent>
